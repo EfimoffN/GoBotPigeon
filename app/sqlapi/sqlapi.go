@@ -2,6 +2,7 @@ package sqlapi
 
 import (
 	"context"
+	"database/sql"
 	"log"
 	"strings"
 
@@ -22,235 +23,232 @@ func NewAPI(db *sqlx.DB) *API {
 	}
 }
 
+// уйти от получения пользоваетля по имени, перейти на id
 // GetUserByName ...
-func (api *API) GetUserByName(nameUser string) (*apitypes.UserRow, error) {
-	return getUserByName(context.Background(), api.db, nameUser)
+func (api *API) GetUserByName(ctx context.Context, nameUser string) (*apitypes.UserRow, error) {
+	return getUserByName(ctx, api.db, nameUser)
 }
 
 func getUserByName(ctx context.Context, db TxContext, nameUser string) (*apitypes.UserRow, error) {
-	userRow := []apitypes.UserRow{}
+	userRow := apitypes.UserRow{}
 
-	err := db.SelectContext(ctx, &userRow, "SELECT * FROM prj_user WHERE (nameuser = $1) LIMIT 1;", nameUser)
+	query := "SELECT userid, nameuser, chatid FROM prj_user WHERE nameuser = $1 LIMIT 1;"
+
+	err := db.GetContext(ctx, &userRow, query, nameUser)
 
 	if err != nil {
-		return nil, errors.Wrapf(err, "can't get user by name %s", nameUser)
+		if !errors.Is(err, sql.ErrNoRows) {
+			return nil, errors.Wrapf(err, "can't get user by name %s", nameUser)
+		}
 	}
-	if len(userRow) == 0 {
-		return nil, err
+	if userRow.UserID == "" {
+		return nil, nil
 	}
-	return &userRow[0], nil
+	return &userRow, nil
 }
 
 // GetUserByID ...
-func (api *API) GetUserByID(idUser string) (*apitypes.UserRow, error) {
-	return getUserByID(context.Background(), api.db, idUser)
+func (api *API) GetUserByID(ctx context.Context, idUser string) (*apitypes.UserRow, error) {
+	return getUserByID(ctx, api.db, idUser)
 }
 
 func getUserByID(ctx context.Context, db TxContext, userID string) (*apitypes.UserRow, error) {
-	userRow := []apitypes.UserRow{}
+	userRow := apitypes.UserRow{}
 
-	err := db.SelectContext(ctx, &userRow, "SELECT * FROM prj_user WHERE (userid = $1) LIMIT 1;", userID)
+	query := "SELECT userid, nameuser, chatid FROM prj_user WHERE userid = $1 LIMIT 1;"
+
+	err := db.GetContext(ctx, &userRow, query, userID)
 	if err != nil {
-		return nil, errors.Wrap(err, "getUserById failed")
+		if !errors.Is(err, sql.ErrNoRows) {
+			return nil, errors.Wrap(err, "getUserById failed")
+		}
 	}
 
-	if len(userRow) == 0 {
-		return nil, err
+	if userRow.UserID == "" {
+		return nil, nil
 	}
 
-	return &userRow[0], err
+	return &userRow, err
 }
 
 // GetCodeByID ...
-func (api *API) GetCodeByID(idCode string) (*apitypes.CodeRow, error) {
-	return getCodeByID(context.Background(), api.db, idCode)
+func (api *API) GetCodeByID(ctx context.Context, idCode string) (*apitypes.CodeRow, error) {
+	return getCodeByID(ctx, api.db, idCode)
 }
 
 func getCodeByID(ctx context.Context, db TxContext, idCode string) (*apitypes.CodeRow, error) {
-	const query = `SELECT * 
+
+	const query = `SELECT codeid, code
 		FROM prj_code 
 		WHERE codeid = $1 
 		LIMIT 1;
 	`
-	codeRow := []apitypes.CodeRow{}
-	if err := db.SelectContext(ctx, &codeRow, query, idCode); err != nil {
-		return nil, errors.Wrapf(err, "can't get code by id %s", idCode)
+	codeRow := apitypes.CodeRow{}
+	if err := db.GetContext(ctx, &codeRow, query, idCode); err != nil {
+		if !errors.Is(err, sql.ErrNoRows) {
+			return nil, errors.Wrapf(err, "can't get code by id %s", idCode)
+		}
 	}
 
-	if len(codeRow) == 0 {
+	if codeRow.CodeID == "" {
 		return nil, nil
 	}
 
-	return &codeRow[0], nil
+	return &codeRow, nil
 }
 
 // GetCodeByCode ...
-func (api *API) GetCodeByCode(codeCode string) (*apitypes.CodeRow, error) {
-	return getCodeByCode(context.Background(), api.db, codeCode)
+func (api *API) GetCodeByCode(ctx context.Context, codeCode string) (*apitypes.CodeRow, error) {
+	return getCodeByCode(ctx, api.db, codeCode)
 }
 
 func getCodeByCode(ctx context.Context, db TxContext, codeCode string) (*apitypes.CodeRow, error) {
-	codeRow := []apitypes.CodeRow{}
+	codeRow := apitypes.CodeRow{}
 
-	err := db.SelectContext(ctx, &codeRow, "SELECT * FROM prj_code WHERE (code = $1)", codeCode)
+	query := "SELECT codeid, code FROM prj_code WHERE code = $1"
+
+	err := db.GetContext(ctx, &codeRow, query, codeCode)
 	if err != nil {
-		return nil, errors.Wrap(err, "GetCodeByCode api.db.Select failed with an error")
+		if !errors.Is(err, sql.ErrNoRows) {
+			return nil, errors.Wrap(err, "GetCodeByCode api.db.Select failed with an error")
+		}
 	}
 
-	if len(codeRow) == 1 {
-		return &codeRow[0], err
+	if codeRow.CodeID == "" {
+		return nil, nil
 	}
 
-	return nil, err
+	return &codeRow, err
 }
 
 // GetRefUserCodeByKeyID ...
-func (api *API) GetRefUserCodeByKeyID(keyID string) (*apitypes.RefUserCode, error) {
-	return getRefUserCodeByKeyID(context.Background(), api.db, keyID)
+func (api *API) GetRefUserCodeByKeyID(ctx context.Context, keyID string) (*apitypes.RefUserCode, error) {
+	return getRefUserCodeByKeyID(ctx, api.db, keyID)
 }
 
 func getRefUserCodeByKeyID(ctx context.Context, db TxContext, keyID string) (*apitypes.RefUserCode, error) {
-	rowUserCode := []apitypes.RefUserCode{}
-	err := db.SelectContext(ctx, &rowUserCode, "SELECT * FROM ref_usercode WHERE keyid = $1 LIMIT 1;", keyID)
+	rowUserCode := apitypes.RefUserCode{}
+
+	query := "SELECT keyid, codeid, userid FROM ref_usercode WHERE keyid = $1 LIMIT 1;"
+
+	err := db.GetContext(ctx, &rowUserCode, query, keyID)
 	if err != nil {
-		return nil, errors.Wrapf(err, "can't get ref_usercode by keyid %s", keyID)
+		if !errors.Is(err, sql.ErrNoRows) {
+			return nil, errors.Wrapf(err, "can't get ref_usercode by keyid %s", keyID)
+		}
 	}
 
-	if len(rowUserCode) == 0 {
+	if rowUserCode.UserID == "" {
 		return nil, nil
 	}
-	return &rowUserCode[0], nil
+	return &rowUserCode, nil
 }
 
 // GetRefUserCodeByUserName ...
-func (api *API) GetRefUserCodeByUserName(userN string) (*apitypes.RefUserCode, error) {
-	return getRefUserCodeByUserName(context.Background(), api.db, userN)
+func (api *API) GetRefUserCodeByUserName(ctx context.Context, userN string) (*apitypes.RefUserCode, error) {
+	return getRefUserCodeByUserName(ctx, api.db, userN)
 }
 
 func getRefUserCodeByUserName(ctx context.Context, db TxContext, userN string) (*apitypes.RefUserCode, error) {
-	user, err := getUserByName(context.Background(), db, userN) // использовать context.Background() или ctx ?
 
+	query := `SELECT ref_usercode.keyid, ref_usercode.codeid, ref_usercode.userid FROM ref_usercode 
+			JOIN prj_user ON ref_usercode.userid = prj_user.userid
+			WHERE prj_user.nameuser = $1 LIMIT 1;`
+
+	rowUserCode := apitypes.RefUserCode{}
+	err := db.GetContext(ctx, &rowUserCode, query, userN)
 	if err != nil {
-		return nil, errors.Wrapf(err, "can't get user by name %s", userN)
+		if !errors.Is(err, sql.ErrNoRows) {
+			return nil, errors.Wrapf(err, "can't get ref_usercode by nameuser %s", userN)
+		}
 	}
 
-	if user == nil {
-		return nil, errors.Wrap(err, "Такой пользователя не зарегестрирован")
-	}
-
-	rowUserCode := []apitypes.RefUserCode{}
-	err = db.SelectContext(ctx, &rowUserCode, "SELECT * FROM ref_usercode WHERE userid = $1 LIMIT 1;", string(user.UserID))
-	if err != nil {
-		return nil, errors.Wrapf(err, "can't get ref_usercode by uer id %s", string(user.UserID))
-	}
-
-	if len(rowUserCode) == 0 {
+	if rowUserCode.UserID == "" {
 		return nil, nil
 	}
 
-	return &rowUserCode[0], nil
+	return &rowUserCode, nil
 }
 
 // AddNewUser ...
-func (api *API) AddNewUser(userN, userID, chatID string) (*apitypes.UserRow, error) {
-	user, err := api.GetUserByID(userID)
+func (api *API) AddNewUser(ctx context.Context, userN, userID, chatID string) (*apitypes.UserRow, error) {
 
+	err := addNewUser(ctx, api.db, userN, userID, chatID)
 	if err != nil {
-		return nil, errors.Wrap(err, "AddNewUser GetUserByID failed with an error")
-	}
-
-	if user != nil {
 		return nil, err
 	}
 
-	tx := api.db.MustBegin()
-	tx.MustExec(`INSERT INTO prj_user ("userid", "nameuser", "chatid") VALUES ($1, $2, $3)`,
-		userID, userN, chatID)
-	tx.Commit()
+	var user *apitypes.UserRow = &apitypes.UserRow{ChatID: chatID, UserID: userID, NameUser: userN}
+	// user.ChatID = chatID
+	// user.UserID = userID
+	// user.NameUser = userN
 
-	user, err = api.GetUserByID(userID)
-	if err != nil {
-		return nil, errors.Wrap(err, "AddNewUser GetUserByID failed with an error")
+	return user, nil
+}
+
+func addNewUser(ctx context.Context, db TxContext, userN, userID, chatID string) error {
+
+	query := `INSERT INTO prj_user ("userid", "nameuser", "chatid") VALUES ($1, $2, $3)`
+
+	if _, err := db.ExecContext(ctx, query,
+		userID, userN, chatID); err != nil {
+		return err
 	}
 
-	return user, err
+	return nil
 }
 
 // AddNewCode ...
-func (api *API) AddNewCode(codeN string) (*apitypes.CodeRow, error) {
+func (api *API) AddNewCode(ctx context.Context, codeN string) (*apitypes.CodeRow, error) {
 	var code *apitypes.CodeRow
-	var err error
 
-	work := func(ctx context.Context, db TxContext) error {
-		code, err = addNewCode(ctx, db, codeN)
-		if err != nil {
-			return err
-		}
-		return nil
+	code, err := addNewCode(ctx, api.db, codeN)
+	if err != nil {
+		return nil, errors.Wrap(err, "addNewCode failed")
 	}
-
-	if err := RunInTransaction(context.Background(), api.db, work); err != nil {
-		return nil, err
-	}
-
 	return code, nil
 }
 
 func addNewCode(ctx context.Context, db TxContext, codeN string) (*apitypes.CodeRow, error) {
-	var code *apitypes.CodeRow
-	var err error
-	var uid string
-
-	code, err = getCodeByCode(context.Background(), db, codeN)
-	if err != nil {
-		return nil, errors.Wrap(err, "AddNewCode GetCodeByCode failed with an error")
-	}
-
-	if code != nil {
-		return nil, err
-	}
-
 	uuidWithHyphen := uuid.New()
-	uid = strings.Replace(uuidWithHyphen.String(), "-", "", -1)
+	uid := strings.Replace(uuidWithHyphen.String(), "-", "", -1)
 
-	if _, err := db.ExecContext(ctx, `INSERT INTO prj_code ("codeid", "code") VALUES ($1, $2)`, uid, codeN); err != nil {
+	query := `INSERT INTO prj_code ("codeid", "code") VALUES ($1, $2)`
+
+	if _, err := db.ExecContext(ctx, query, uid, codeN); err != nil {
 		return nil, err
 	}
 
-	code, err = getCodeByID(context.Background(), db, uid)
-	if err != nil {
-		return nil, errors.Wrap(err, "AddNewCode GetCodeByID failed with an error")
-	}
+	var code *apitypes.CodeRow = &apitypes.CodeRow{Code: codeN, CodeID: uid}
 
 	return code, nil
 }
 
+// можно разбить метод на 2 метода и перед добавление проверять на существование связи кодово слово  - пользователь
 // AddRefUserCode ...
-func (api *API) AddRefUserCode(codeR string, userIDR string) (*apitypes.RefUserCode, error) {
-	var refUserCode *apitypes.RefUserCode
+func (api *API) AddRefUserCode(ctx context.Context, codeR string, userIDR string) (*apitypes.RefUserCode, error) {
 	var err error
 	var uid string
 
-	user, err := getUserByID(context.Background(), api.db, userIDR)
-	if err != nil {
-		return nil, errors.Wrap(err, "get user by Id failed")
-	}
-	if user == nil {
-		return nil, errors.Wrap(err, "Такой пользователя не зарегестрирован")
-	}
-
 	work := func(ctx context.Context, db TxContext) error {
-		refUserCode, err := getRefUserCodeByUserName(context.Background(), api.db, user.NameUser) // использовать context.Background() или ctx ?
+		refUserCode := apitypes.RefUserCode{} // перенес в функцию, но мне не нравится это решение, надо уточнить как правильно делать
+
+		query := `SELECT ref_usercode.keyid, ref_usercode.codeid, ref_usercode.userid 
+					FROM ref_usercode WHERE ref_usercode.userid = $1 LIMIT 1;`
+
+		err := db.GetContext(ctx, &refUserCode, query, userIDR)
 		if err != nil {
-			return errors.Wrap(err, "getRefUserCodeByUserName failed")
+			if !errors.Is(err, sql.ErrNoRows) {
+				return errors.Wrap(err, "getRefUserCodeByUserName failed")
+			}
 		}
 
-		if refUserCode != nil {
+		if refUserCode.UserID != "" {
 			log.Printf("Пользователь уже установил кодовое слово")
 			return err
 		}
 
-		code, err := getCodeByCode(context.Background(), api.db, codeR) // использовать context.Background() или ctx ?
+		code, err := getCodeByCode(ctx, api.db, codeR)
 		if err != nil {
 			return errors.Wrap(err, "GetCodeByCode failed")
 		}
@@ -262,18 +260,20 @@ func (api *API) AddRefUserCode(codeR string, userIDR string) (*apitypes.RefUserC
 		uuidWithHyphen := uuid.New()
 		uid = strings.Replace(uuidWithHyphen.String(), "-", "", -1)
 
-		if _, err := db.ExecContext(ctx, `INSERT INTO ref_usercode ("keyid", "codeid", "userid") VALUES ($1, $2, $3)`, uid, code.CodeID, user.UserID); err != nil {
+		insert := `INSERT INTO ref_usercode ("keyid", "codeid", "userid") VALUES ($1, $2, $3)`
+
+		if _, err := db.ExecContext(ctx, insert, uid, code.CodeID, userIDR); err != nil {
 			return err
 		}
 
 		return nil
 	}
 
-	if err := RunInTransaction(context.Background(), api.db, work); err != nil {
+	if err := RunInTransaction(ctx, api.db, work); err != nil {
 		return nil, err
 	}
 
-	refUserCode, err = api.GetRefUserCodeByKeyID(uid)
+	refUserCode, err := api.GetRefUserCodeByKeyID(ctx, uid)
 	if err != nil {
 		return nil, errors.Wrap(err, "GetRefUserCodeByKeyID failed")
 	}
@@ -282,59 +282,75 @@ func (api *API) AddRefUserCode(codeR string, userIDR string) (*apitypes.RefUserC
 }
 
 // UpdateRefUserCode ...
-func (api *API) UpdateRefUserCode(codeR string, userR string) (*apitypes.RefUserCode, error) { // проверить метод, может не корректно работать !!!
-
-	var refUserCode *apitypes.RefUserCode
-	var keyID string
+func (api *API) UpdateRefUserCode(ctx context.Context, codeR string, userID string) (*apitypes.RefUserCode, error) { // проверить метод, может не корректно работать !!!
 
 	work := func(ctx context.Context, db TxContext) error {
-		user, err := api.GetUserByName(userR)
+		refUserCode, err := api.GetRefUserCodeByUserID(ctx, userID)
 		if err != nil {
-			return errors.Wrapf(err, "Get user by name failed: %s", userR)
+			return errors.Wrapf(err, "SELECT ref_usercode failed: %s", userID)
 		}
 
-		refUserCode, err := api.GetRefUserCodeByUserName(user.NameUser)
-		if err != nil {
-			return errors.Wrapf(err, "Get ref user code by user name failed: %s", user.NameUser)
-		}
-
-		code, err := api.GetCodeByCode(codeR)
+		code, err := api.GetCodeByCode(ctx, codeR)
 		if err != nil {
 			return errors.Wrapf(err, "Get code by code failed: %s", codeR)
 		}
 
 		if code == nil {
-			code, err = api.AddNewCode(codeR)
-		}
-
-		if err != nil {
-			return errors.Wrapf(err, "Add new code failed: %s", codeR)
-		}
-
-		if refUserCode == nil {
-			refUserCode, err = api.AddRefUserCode(codeR, userR)
-
+			code, err = api.AddNewCode(ctx, codeR)
 			if err != nil {
-				return errors.Wrapf(err, "Add ref user code failed: %s", userR)
+				return errors.Wrapf(err, "Add new code failed: %s", codeR)
 			}
 		}
-		keyID = refUserCode.KeyID
 
-		if _, err := db.ExecContext(ctx, `UPDATE ref_usercode SET codeid = $1 WHERE keyid = $2`, code.CodeID, refUserCode.KeyID); err != nil {
+		if refUserCode == nil { // можно убрать, не должно прилетать сюда без установленного ключа
+			_, err := api.AddRefUserCode(ctx, codeR, userID)
+
+			if err != nil {
+				return errors.Wrapf(err, "Add ref user code failed: %s", userID)
+			}
+			return nil
+		}
+
+		query := `UPDATE ref_usercode SET codeid = $1 WHERE keyid = $2`
+		if _, err := db.ExecContext(ctx, query, code.CodeID, refUserCode.KeyID); err != nil {
 			return errors.Wrap(err, "UPDATE ref_usercode failed: %s")
 		}
 
 		return nil
 	}
 
-	if err := RunInTransaction(context.Background(), api.db, work); err != nil {
+	if err := RunInTransaction(ctx, api.db, work); err != nil {
 		return nil, err
 	}
 
-	refUserCode, err := api.GetRefUserCodeByKeyID(keyID)
+	refCode, err := api.GetRefUserCodeByUserID(ctx, userID)
 	if err != nil {
 		return nil, errors.Wrap(err, "Get ref user code by key ID")
 	}
 
-	return refUserCode, err
+	return refCode, err
+}
+
+// GetRefUserCodeByKeyID ...
+func (api *API) GetRefUserCodeByUserID(ctx context.Context, userID string) (*apitypes.RefUserCode, error) {
+	return getRefUserCodeByUserID(ctx, api.db, userID)
+}
+
+func getRefUserCodeByUserID(ctx context.Context, db TxContext, userID string) (*apitypes.RefUserCode, error) {
+	rowUserCode := apitypes.RefUserCode{}
+
+	queryRefCode := `SELECT ref_usercode.keyid, ref_usercode.codeid, ref_usercode.userid 
+	FROM ref_usercode WHERE ref_usercode.userid = $1 LIMIT 1;`
+
+	err := db.GetContext(ctx, &rowUserCode, queryRefCode, userID)
+	if err != nil {
+		if !errors.Is(err, sql.ErrNoRows) {
+			return nil, errors.Wrapf(err, "can't get ref_usercode by userid %s", userID)
+		}
+	}
+
+	if rowUserCode.UserID == "" {
+		return nil, nil
+	}
+	return &rowUserCode, nil
 }

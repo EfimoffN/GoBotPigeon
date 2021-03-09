@@ -2,6 +2,7 @@ package sqlapi
 
 import (
 	"context"
+	"database/sql"
 	"strings"
 	"time"
 
@@ -12,83 +13,55 @@ import (
 )
 
 // CheckingPigeonWork ...
-func (api *API) CheckingPigeonWork(userN string) (bool, error) {
+func (api *API) CheckingPigeonWork(ctx context.Context, userID string) (bool, error) {
 
-	user, err := api.GetUserByName(userN)
+	var botWork = apitypes.BotWork{}
+
+	query := "SELECT * FROM prj_botwork WHERE userid = $1 LIMIT 1;"
+
+	err := api.db.GetContext(ctx, &botWork, query, userID)
 	if err != nil {
-		return false, errors.Wrap(err, "Get user by name failed")
+		if !errors.Is(err, sql.ErrNoRows) {
+			return false, errors.Wrap(err, "SELECT * FROM prj_botwork failed")
+		}
+	}
+	if botWork.UserID == "" {
+		return false, nil
 	}
 
-	var botWork = []apitypes.BotWork{}
-	err = api.db.Select(&botWork, "SELECT * FROM prj_botwork WHERE userid = $1 LIMIT 1;", user.UserID)
-	if err != nil {
-		return false, errors.Wrap(err, "SELECT * FROM prj_botwork failed")
-	}
-	if len(botWork) == 0 {
-		return false, err
-	}
-
-	return botWork[0].BotWorkFlag, err
+	return botWork.BotWorkFlag, err
 }
 
 // StartPigeonWork ...
-func (api *API) StartPigeonWork(userN string) error {
+func (api *API) StartPigeonWork(ctx context.Context, userID string) error { // проверить как работает
 
-	user, err := getUserByName(context.Background(), api.db, userN)
+	err := api.CreatePigeonWorkFlag(ctx, userID)
 	if err != nil {
-		return errors.Wrap(err, "Get user by name failed")
-	}
-
-	work := func(ctx context.Context, db TxContext) error {
-		var botWork = []apitypes.BotWork{}
-		err = db.SelectContext(ctx, &botWork, "SELECT * FROM prj_botwork WHERE userid = $1 LIMIT 1;", user.UserID)
-		if err != nil {
-			return errors.Wrap(err, "SELECT * FROM prj_botwork failed")
-		}
-
-		if len(botWork) == 0 {
-			err = api.CreatePigeonWorkFlag(userN)
-			if err != nil {
-				return errors.Wrap(err, "Create pigeon work flag failed")
-			}
-		} else {
-			if _, err := db.ExecContext(ctx, `UPDATE prj_botwork SET botworkflag = $1  WHERE botworkid = $2`, true, botWork[0].BotWorkID); err != nil {
-				return errors.Wrap(err, "UPDATE prj_botwork SET failed")
-			}
-		}
-
-		return nil
-	}
-
-	if err := RunInTransaction(context.Background(), api.db, work); err != nil {
-		return errors.Wrap(err, "RunInTransaction failed")
+		return errors.Wrap(err, "Create pigeon work flag failed")
 	}
 
 	return nil
 }
 
 // StopPigeonWork ...
-func (api *API) StopPigeonWork(userN string) error {
-	user, err := api.GetUserByName(userN)
-	if err != nil {
-		return errors.Wrap(err, "Get user by name failed")
-	}
-
+func (api *API) StopPigeonWork(ctx context.Context, userID string) error {
 	work := func(ctx context.Context, db TxContext) error {
 
-		var botWork = []apitypes.BotWork{}
-		err = db.SelectContext(ctx, &botWork, "SELECT * FROM prj_botwork WHERE userid = $1 LIMIT 1", user.UserID)
-		if err != nil {
-			return errors.Wrap(err, "SELECT * FROM prj_botwork failed")
-		}
+		query := `INSERT INTO prj_botwork ("botworkid", "userid", "botworkflag") VALUES ($1, $2, $3)
+					ON CONFLICT (userid)
+					DO 
+					UPDATE SET botworkflag = $3`
 
-		if _, err := db.ExecContext(ctx, `UPDATE prj_botwork SET botworkflag = $1 WHERE botworkid = $2`, false, botWork[0].BotWorkID); err != nil {
-			return errors.Wrap(err, "UPDATE prj_botwork failed")
+		uuidWithHyphen := uuid.New()
+		uid := strings.Replace(uuidWithHyphen.String(), "-", "", -1)
+
+		if _, err := db.ExecContext(ctx, query, uid, userID, false); err != nil {
+			return err
 		}
 		return nil
 	}
 
-	if err := RunInTransaction(context.Background(), api.db, work); err != nil {
+	if err := RunInTransaction(ctx, api.db, work); err != nil {
 		return err
 	}
 
@@ -96,33 +69,24 @@ func (api *API) StopPigeonWork(userN string) error {
 }
 
 // CreatePigeonWorkFlag ...
-func (api *API) CreatePigeonWorkFlag(userN string) error {
-	user, err := api.GetUserByName(userN)
-	if err != nil {
-		return errors.Wrap(err, "Get user by name failed")
-	}
-
+func (api *API) CreatePigeonWorkFlag(ctx context.Context, userID string) error {
 	work := func(ctx context.Context, db TxContext) error {
-		var botWork = []apitypes.BotWork{}
-		err = db.SelectContext(ctx, &botWork, "SELECT * FROM prj_botwork WHERE userid = $1", user.UserID)
 
-		if err != nil {
-			return errors.Wrap(err, "SELECT * FROM prj_botwork failed")
+		query := `INSERT INTO prj_botwork ("botworkid", "userid", "botworkflag") VALUES ($1, $2, $3)
+					ON CONFLICT (userid)
+					DO 
+					UPDATE SET botworkflag = $3`
+
+		uuidWithHyphen := uuid.New()
+		uid := strings.Replace(uuidWithHyphen.String(), "-", "", -1)
+
+		if _, err := db.ExecContext(ctx, query, uid, userID, true); err != nil {
+			return err
 		}
-
-		if len(botWork) == 0 {
-			uuidWithHyphen := uuid.New()
-			uid := strings.Replace(uuidWithHyphen.String(), "-", "", -1)
-
-			if _, err := db.ExecContext(ctx, `INSERT INTO prj_botwork ("botworkid", "userid", "botworkflag") VALUES ($1, $2, $3)`, uid, user.UserID, true); err != nil {
-				return err
-			}
-		}
-
 		return nil
 	}
 
-	if err := RunInTransaction(context.Background(), api.db, work); err != nil {
+	if err := RunInTransaction(ctx, api.db, work); err != nil {
 		return err
 	}
 
@@ -130,35 +94,39 @@ func (api *API) CreatePigeonWorkFlag(userN string) error {
 }
 
 // SetLastComandUser ...
-func (api *API) SetLastComandUser(userN string, command string) error {
-	user, err := api.GetUserByName(userN)
+func (api *API) SetLastComandUser(ctx context.Context, userN string, command string) error {
+	user, err := api.GetUserByName(ctx, userN)
 	if err != nil {
 		return errors.Wrap(err, "Get user by name failed")
 	}
 
 	work := func(ctx context.Context, db TxContext) error {
+
+		query := `INSERT INTO prj_lastusercommand ("commandid", "userid", "command", "datacommand") 
+					VALUES ($1, $2, $3, $4)`
+
 		uuidWithHyphen := uuid.New()
 		uid := strings.Replace(uuidWithHyphen.String(), "-", "", -1)
 		today := time.Now()
 		tTime := today.Add(10 * time.Minute).Format("2006/1/2 15:04")
-		if _, err := db.ExecContext(ctx, `INSERT INTO prj_lastusercommand ("commandid", "userid", "command", "datacommand") VALUES ($1, $2, $3, $4)`, uid, user.UserID, command, tTime); err != nil {
+		if _, err := db.ExecContext(ctx, query, uid, user.UserID, command, tTime); err != nil {
 			return err
 		}
 		return nil
 	}
-	if err := RunInTransaction(context.Background(), api.db, work); err != nil {
+	if err := RunInTransaction(ctx, api.db, work); err != nil {
 		return err
 	}
 	return nil
 }
 
 // GetLastCommandByUserName ...
-func (api *API) GetLastCommandByUserName(userN string) (*apitypes.LastUserCommand, error) {
-	return getLastCommandByUserName(context.Background(), api.db, userN)
+func (api *API) GetLastCommandByUserName(ctx context.Context, userN string) (*apitypes.LastUserCommand, error) {
+	return getLastCommandByUserName(ctx, api.db, userN)
 }
 
 func getLastCommandByUserName(ctx context.Context, db TxContext, userN string) (*apitypes.LastUserCommand, error) {
-	user, err := getUserByName(context.Background(), db, userN) // использовать context.Background() или ctx ?
+	user, err := getUserByName(ctx, db, userN)
 
 	if err != nil {
 		return nil, errors.Wrap(err, "Get user by name failed")
@@ -168,37 +136,32 @@ func getLastCommandByUserName(ctx context.Context, db TxContext, userN string) (
 		return nil, nil // создать ошибку
 	}
 
-	var arrCommand = []apitypes.LastUserCommand{}
+	var arrCommand = apitypes.LastUserCommand{}
 
-	err = db.SelectContext(ctx, &arrCommand, "SELECT * FROM prj_lastusercommand WHERE (userid = $1) ORDER BY datacommand DESC", user.UserID)
+	query := `SELECT commandid, userid, command, datacommand FROM prj_lastusercommand 
+				WHERE (userid = $1) ORDER BY datacommand DESC`
+
+	err = db.GetContext(ctx, &arrCommand, query, user.UserID)
 	if err != nil {
-		return nil, errors.Wrap(err, "SELECT * FROM prj_lastusercommand failed")
+		if !errors.Is(err, sql.ErrNoRows) {
+			return nil, errors.Wrap(err, "SELECT * FROM prj_lastusercommand failed")
+		}
 	}
 
-	if len(arrCommand) == 0 {
-		return nil, nil // создать ошибку
+	if arrCommand.UserID == "" {
+		return nil, nil
 	}
 
-	return &arrCommand[0], nil
+	return &arrCommand, nil
 }
 
 // DeleteLastCommand ...
-func (api *API) DeleteLastCommand(userN string, command string) error {
-	user, err := api.GetUserByName(userN)
-	if err != nil {
-		return errors.Wrap(err, "GetUserByName failed")
-	}
+func (api *API) DeleteLastCommand(ctx context.Context, userId string, command string) error {
 
-	work := func(ctx context.Context, db TxContext) error {
-		if _, err := db.ExecContext(ctx, `DELETE FROM prj_lastusercommand WHERE userid = $1`, user.UserID); err != nil {
-			return errors.Wrap(err, "DELETE FROM prj_lastusercommand")
-		}
+	query := `DELETE FROM prj_lastusercommand WHERE userid = $1`
 
-		return nil
-	}
-
-	if err := RunInTransaction(context.Background(), api.db, work); err != nil {
-		return err
+	if _, err := api.db.ExecContext(ctx, query, userId); err != nil {
+		return errors.Wrap(err, "DELETE FROM prj_lastusercommand")
 	}
 	return nil
 }
